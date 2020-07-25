@@ -24,20 +24,7 @@ def get_user_action(keyboard):
     char = 'N'
     while char not in actions_dict:
         # 返回按下键的 ascii 码值
-        tmp = keyboard.getch()
-        
-        # 判断是否方向键
-        if tmp == 224:
-            if kkeyboard.getch() == 72:
-                return 'Up'
-            elif kkeyboard.getch() == 75:
-                return 'Left'
-            elif kkeyboard.getch() == 77:
-                return 'Right'
-            elif kkeyboard.getch() == 80:
-                return 'Down'
-        else:
-            char = tmp
+        char = keyboard.getch()
     # 返回输入键位对应的行为
     return actions_dict[char]
 
@@ -279,7 +266,7 @@ def main(stdscr):
     curses.use_default_colors()
 
     # 设置终结状态最大数值为 2048
-    game_field = GameField(win=2048)
+    game_field = GameField(win=32)
 
     state = 'Init'
 

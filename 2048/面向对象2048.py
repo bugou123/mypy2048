@@ -3,7 +3,6 @@ import random
 import curses
 from itertools import chain
 
-
 class Action(object):
 
     UP = 'up'
@@ -62,8 +61,9 @@ class Grid(object):
             new_row = []
             for i in range(len(row)):
                 if pair:
+                    global Score
                     new_row.append(2 * row[i])
-                    # self.score += 2 * row[i]
+                    Score += 2 * row[i]
                     pair = False
                 else:
                     if i + 1 < len(row) and row[i] == row[i + 1]:
@@ -132,13 +132,12 @@ class Screen(object):
     over_string = '           GAME OVER'
     win_string = '          YOU WIN!'
 
-    def __init__(self, screen=None, grid=None, score=0, best_score=0, over=False, win=False):
+    def __init__(self, screen=None, grid=None, best_score=0, over=False, win=False):
         self.grid = grid
-        self.score = score
+        self.best_score = best_score
         self.over = over
         self.win = win
         self.screen = screen
-        self.counter = 0
 
     def cast(self, string):
         self.screen.addstr(string + '\n')
@@ -148,7 +147,9 @@ class Screen(object):
 
     def draw(self):
         self.screen.clear()
-        self.cast('SCORE: ' + str(self.score))
+        self.cast('SCORE: ' + str(Score))
+        if 0 != self.best_score:
+            self.cast('HIGHSCORE: ' + str(self.best_score))
         for row in self.grid.cells:
             self.cast('+-----' * self.grid.size + '+')
             self.draw_row(row)
@@ -167,22 +168,24 @@ class Screen(object):
 
 class GameManager(object):
 
-    def __init__(self, size=4, win_num=2048):
+    def __init__(self, size=4, win_num=32):
         self.size = size
         self.win_num = win_num
+        self.best_score = 0
         self.reset()
 
     def reset(self):
+        global Score
         self.state = 'init'
         self.win = False
         self.over = False
-        self.score = 0
+        Score = 0
         self.grid = Grid(self.size)
         self.grid.reset()
 
     @property
     def screen(self):
-        return Screen(screen=self.stdscr, score=self.score, grid=self.grid, win=self.win, over=self.over)
+        return Screen(screen=self.stdscr, grid=self.grid, best_score=self.best_score, win=self.win, over=self.over)
 
     def move(self, direction):
         if self.can_move(direction):
@@ -199,7 +202,11 @@ class GameManager(object):
 
     @property
     def is_over(self):
-        self.over = not any(self.can_move(move) for move in self.action.actions)
+        for i in range(4):
+            if self.can_move(self.action.actions[i]):
+                self.over = False
+                return self.over
+        self.over = True
         return self.over
 
     def can_move(self, direction):
@@ -219,6 +226,9 @@ class GameManager(object):
             return 'exit'
         if self.move(action):
             if self.is_win:
+                global Score
+                if Score > self.best_score:
+                    self.best_score = Score
                 return 'win'
             if self.is_over:
                 return 'over'
@@ -226,7 +236,11 @@ class GameManager(object):
 
     def _restart_or_exit(self):
         self.screen.draw()
-        return 'init' if self.action.get() == Action.RESTART else 'exit'
+        if self.action.get() == Action.RESTART:
+            return 'init'
+        if self.action.get() == Action.EXIT:
+            return 'exit'
+        return 'over'
 
     def state_win(self):
         return self._restart_or_exit()
