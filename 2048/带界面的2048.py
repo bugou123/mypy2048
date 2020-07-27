@@ -1,228 +1,311 @@
-# _*_ coding:UTF-8 _*_
+# -*- coding: utf-8 -*-
 
-import numpy, sys, random, pygame
-from pygame.locals import*
+import wx
+import os
+import random
+import copy
 
-Size = 4                                          #4*4行列
-Block_WH = 110                                    #每个块的长度宽度
-BLock_Space = 10                                  #两个块之间的间隙
-Block_Size = Block_WH * Size + (Size + 1) * BLock_Space
-Matrix = numpy.zeros([Size, Size])                #初始化矩阵4*4的0矩阵
-Screen_Size = (Block_Size, Block_Size + 110)
-Title_Rect = pygame.Rect(0, 0, Block_Size, 110)   #设置标题矩形的大小
-Score = 0
+class Frame(wx.Frame):
 
-Block_Color = {
-        0:(150, 150, 150),
-        2:(255, 255, 255),
-        4:(255, 255, 128),
-        8:(255, 255, 0),
-        16:(255, 220, 128),
-        32:(255, 220, 0),
-        64:(255, 190, 0),
-        128:(255, 160, 0),
-        256:(255, 130, 0),
-        512:(255, 100, 0),
-        1024:(255, 70, 0),
-        2048:(255, 40, 0),
-        4096:(255, 10, 0),
-}                                                     #数块颜色
+    def __init__(self,title):
+        # 初始化，设置标题、默认 style
+        super(Frame,self).__init__(None,-1,title,
+                style = wx.DEFAULT_FRAME_STYLE^wx.MAXIMIZE_BOX^wx.RESIZE_BORDER)
 
-#基础类
-class UpdateNew(object):
-	"""docstring for UpdateNew"""
-	def __init__(self, matrix):
-		super(UpdateNew, self).__init__()
-		self.matrix = matrix
-		self.score  = 0
-		self.zerolist = []
+        self.colors = {0:(204,192,179),2:(238, 228, 218),4:(237, 224, 200),
+                8:(242, 177, 121),16:(245, 149, 99),32:(246, 124, 95),
+                64:(246, 94, 59),128:(237, 207, 114),256:(237, 207, 114),
+                512:(237, 207, 114),1024:(237, 207, 114),2048:(237, 207, 114)}
+                
+        # 设置图标
+        self.setIcon()
+        # 初始化游戏环境，字体、棋盘等
+        self.initGame()
+        # 定义缓冲区来画图
+        self.initBuffer()
+        # 创建面板
+        panel = wx.Panel(self)
+        # 绑定方法到键盘事件
+        panel.Bind(wx.EVT_KEY_DOWN, self.onKeyDown)
+        panel.SetFocus()
+        # 绑定触发事件的条件和函数方法
+        self.Bind(wx.EVT_SIZE, self.onSize)  # use wx.BufferedPaintDC
+        self.Bind(wx.EVT_PAINT, self.onPaint)
+        self.Bind(wx.EVT_CLOSE, self.onClose)
 
-	def combineList(self, rowlist):
-		start_num = 0
-		end_num = Size - rowlist.count(0) - 1
-		while start_num < end_num:
-			if rowlist[start_num] == rowlist[start_num+1]:
-				rowlist[start_num] *= 2
-				self.score += int(rowlist[start_num])                      #每次返回累加的分数
-				rowlist[start_num + 1:] = rowlist[start_num + 2:]
-				rowlist.append(0)
-			start_num += 1
-		return rowlist
+        self.SetClientSize((505,720))
+        self.Center()
+        self.Show()
+    
+    def onPaint(self, event):
+        dc = wx.BufferedPaintDC(self, self.buffer)
+    
+    def onClose(self, event):
+        # 退出时保存分数
+        self.saveScore()
+        self.Destroy()
 
-	def removeZero(self, rowlist):
-		while True:
-			mid = rowlist[:]                      #拷贝一份list
-			try:
-				rowlist.remove(0)
-				rowlist.append(0)
-			except:
-				pass
-			if rowlist == mid:
-				break;
-		return self.combineList(rowlist)
+    def setIcon(self):
+        # 设置图标
+        icon = wx.Icon("icon.ico", wx.BITMAP_TYPE_ICO)
+        self.SetIcon(icon)
 
-	def toSequence(self, matrix):
-		lastmatrix = matrix.copy()
-		m, n = matrix.shape                                         #获得矩阵的行，列
-		for i in range(m):
-			newList = self.removeZero(list(matrix[i]))
-			matrix[i] = newList
-			for k in range(Size - 1, Size - newList.count(0) - 1, -1):     #添加所有有0的行号列号
-				self.zerolist.append((i, k))
-		if matrix.min() == 0 and (matrix != lastmatrix).any():       #矩阵中有最小值0且移动后的矩阵不同，才可以添加0位置处添加随机数
-			GameInit.initData(Size, matrix, self.zerolist)
-		return matrix
-	                      
+    # 读取分数
+    def loadScore(self):
+        # 判断存储最高分数的文件是否存在
+        if os.path.exists("bestscore.ini"):
+            # 读取分数文件
+            ff = open("bestscore.ini")
+            self.bstScore = int(ff.read())
+            ff.close()
 
-class LeftAction(UpdateNew):
-	"""docstring for LeftAction"""
-	def __init__(self, matrix):
-		super(LeftAction, self).__init__(matrix)
+    # 保存分数
+    def saveScore(self):
+        # 打开 bestscore.ini 文件，写入最高分
+        ff = open("bestscore.ini","w")
+        ff.write(str(self.bstScore))
+        ff.close()
 
-	def handleData(self):
-		matrix = self.matrix.copy()                               #获得一份矩阵的复制
-		newmatrix = self.toSequence(matrix)
-		return newmatrix, self.score
+    def initGame(self):
+        # 初始化字体
+        self.bgFont = wx.Font(50, wx.SWISS, wx.NORMAL, wx.BOLD, face = u"Roboto")
+        self.scFont = wx.Font(36, wx.SWISS, wx.NORMAL, wx.BOLD, face = u"Roboto")
+        self.smFont = wx.Font(12, wx.SWISS, wx.NORMAL, wx.NORMAL, face = u"Roboto")
+        self.curScore = 0
+        self.bstScore = 0
+        self.loadScore()
+        # 定义象征棋盘的二维矩阵
+        self.data = [[0,0,0,0], [0,0,0,0], [0,0,0,0], [0,0,0,0]]
+        count = 0
+        # 随机生成 2 和 4，两次
+        while count < 2:
+            row = random.randint(0, len(self.data)-1)
+            col = random.randint(0, len(self.data[0])-1)
+            # 如果随机出的位置不等于 0 就跳过一次循环
+            if self.data[row][col] != 0:
+                continue
+            self.data[row][col] = 2 if random.randint(0,1) else 4
+            count += 1
 
-class RightAction(UpdateNew):
-	"""docstring for RightAction"""
-	def __init__(self, matrix):
-		super(RightAction, self).__init__(matrix)
+    def initBuffer(self):
+        # 得到应用窗口的宽和高
+        w, h = self.GetClientSize()
+        # 定义一块 buffer
+        self.buffer = wx.EmptyBitmap(w,h)
 
-	def handleData(self):
-		matrix = self.matrix.copy()[:,::-1]
-		newmatrix = self.toSequence(matrix)
-		return newmatrix[:,::-1], self.score
+    def onSize(self, event):
+        # 当触发尺寸变换时调用
+        self.initBuffer()
+        self.drawAll()
 
-class UpAction(UpdateNew):
-	"""docstring for UpAction"""
-	def __init__(self, matrix):
-		super(UpAction, self).__init__(matrix)
+    def putTile(self):
+        available = []
+        for row in range(len(self.data)):
+            for col in range(len(self.data[0])):
+                if self.data[row][col] == 0: available.append((row, col))
+        if available:
+            row,col = available[random.randint(0, len(available) - 1)]
+            self.data[row][col] = 2 if random.randint(0, 1) else 4
+            return True
+        return False
 
-	def handleData(self):
-		matrix = self.matrix.copy().T
-		newmatrix = self.toSequence(matrix)
-		return newmatrix.T, self.score
+    def slideUpDown(self, up):
+        score = 0
+        # 获取二维矩阵的长宽
+        numCols = len(self.data[0])
+        numRows = len(self.data)
+        # 深度复制二位矩阵，存储到 oldData
+        oldData = copy.deepcopy(self.data)
 
+        for col in range(numCols):
+            # 遍历找到不为零的数，即在棋盘上已经显示出来的数
+            cvl = [self.data[row][col] for row in range(numRows) if self.data[row][col] != 0]
 
-class DownAction(UpdateNew):
-	"""docstring for DownAction"""
-	def __init__(self, matrix):
-		super(DownAction, self).__init__(matrix)
+            if len(cvl)>=2:
+                # 用 update 函数返回这一 direct（上、下、左、右） 的得分
+                score += self.update(cvl, up)
+            # 判断空出的位置补零
+            for i in range(numRows - len(cvl)):
+                if up:
+                    # 在后面加零
+                    cvl.append(0)
+                else:
+                    # 在前面加零
+                    cvl.insert(0,0)
+            # 更新棋盘
+            for row in range(numRows):
+                self.data[row][col] = cvl[row]
+        return oldData != self.data, score
 
-	def handleData(self):
-		matrix = self.matrix.copy()[::-1].T
-		newmatrix = self.toSequence(matrix)
-		return newmatrix.T[::-1], self.score
+    def update(self, vlist, direct):
+        score = 0
+        if direct:  # up or left
+            i = 1
+            # 判断是否有相邻元素相等
+            while i < len(vlist):
+                if vlist[i-1] == vlist[i]:
+                    # 删除相等相邻元素中的靠后元素
+                    del vlist[i]
+                    # 更新合并后的元素
+                    vlist[i-1] *= 2
+                    # 更新分数
+                    score += vlist[i-1]
+                    i += 1
+                i += 1
+        else:
+            i = len(vlist)-1
+            while i > 0:
+                if vlist[i-1]==vlist[i]:
+                    del vlist[i]
+                    vlist[i-1] *= 2
+                    score += vlist[i-1]
+                    i -= 1
+                i -= 1
+        return score
 
+    def slideLeftRight(self,left):
+        score = 0
+        numRows = len(self.data)
+        numCols = len(self.data[0])
+        oldData = copy.deepcopy(self.data)
+        
+        for row in range(numRows):
+            rvl = [self.data[row][col] for col in range(numCols) if self.data[row][col]!=0]
 
-class GameInit(object):
-	"""docstring for GameInit"""
-	def __init__(self):
-		super(GameInit, self).__init__()
+            if len(rvl)>=2:           
+                score += self.update(rvl,left)
+            for i in range(numCols-len(rvl)):
+                if left: rvl.append(0)
+                else: rvl.insert(0,0)
+            for col in range(numCols): self.data[row][col] = rvl[col]
+        return oldData!=self.data,score
 
-	@staticmethod
-	def getRandomLocal(zerolist = None):
-		if zerolist == None:
-			a = random.randint(0, Size-1)
-			b = random.randint(0, Size-1)
-		else:
-			a, b = random.sample(zerolist, 1)[0]
-		return a, b
+    def isGameOver(self):
+        copyData = copy.deepcopy(self.data)
 
-	@staticmethod
-	def getNewNum():                             #随机返回2或者4
-		n = random.random()
-		if n > 0.89:
-			n = 4
-		else:
-			n = 2
-		return n
+        flag = False
+        # 当四个方向都无法移动时，GameOver
+        if not self.slideUpDown(True)[0] and not self.slideUpDown(False)[0] and \
+                not self.slideLeftRight(True)[0] and not self.slideLeftRight(False)[0]:
+            flag = True
+        # 还原 self.data
+        if not flag: self.data = copyData
+        return flag
 
+    def doMove(self,move,score):
+        if move:
+            self.putTile()
+            self.drawChange(score)
+            if self.isGameOver():
+                if wx.MessageBox(u"游戏结束，是否重新开始？",u"哈哈",
+                        wx.YES_NO|wx.ICON_INFORMATION)==wx.YES:
+                    bstScore = self.bstScore
+                    self.initGame()
+                    self.bstScore = bstScore
+                    self.drawAll()
 
-	@classmethod
-	def initData(cls, Size, matrix = None, zerolist = None):
-		if matrix is None:
-			matrix = Matrix.copy()
-		a, b = cls.getRandomLocal(zerolist)       #zerolist空任意返回(x, y)位置，否则返回任意一个0元素位置
-		n = cls.getNewNum()
-		matrix[a][b] = n
-		return matrix                           #返回初始化任意位置为2或者4的矩阵
+    # “↑ ↓ ← →”四个按键对应的棋盘处理方法
+    def onKeyDown(self, event):
+        # 获得键盘输入
+        keyCode = event.GetKeyCode()
+        # 对不同方向键作不同的处理
+        if keyCode == wx.WXK_UP:
+            self.doMove(*self.slideUpDown(True))
+        elif keyCode == wx.WXK_DOWN:
+            self.doMove(*self.slideUpDown(False))
+        elif keyCode == wx.WXK_LEFT:
+            self.doMove(*self.slideLeftRight(True))
+        elif keyCode == wx.WXK_RIGHT:
+            self.doMove(*self.slideLeftRight(False))        
+                
+    def drawBg(self,dc):
+        dc.SetBackground(wx.Brush((250,248,239)))
+        dc.Clear()
+        dc.SetBrush(wx.Brush((187,173,160)))
+        dc.SetPen(wx.Pen((187,173,160)))
+        dc.DrawRoundedRectangle(15,150,475,475,5)
 
-	@classmethod
-	def drawSurface(cls, screen, matrix, score):
-		pygame.draw.rect(screen, (255, 255, 255), Title_Rect)              #第一个参数是屏幕，第二个参数颜色，第三个参数rect大小，第四个默认参数
-		font1 = pygame.font.SysFont('simsun', 48)
-		font2 = pygame.font.SysFont(None, 32)
-		screen.blit(font1.render('Score:', True, (255, 127, 0)), (20, 25))     #font.render第一个参数是文本内容，第二个参数是否抗锯齿，第三个参数字体颜色
-		screen.blit(font1.render('%s' % score, True, (255, 127, 0)), (170, 25))
-		screen.blit(font2.render('up', True, (255, 127, 0)), (360, 20))
-		screen.blit(font2.render('left  down  right', True, (255, 127, 0)), (300, 50))
-		a, b = matrix.shape
-		for i in range(a):
-			for j in range(b):
-				cls.drawBlock(screen, i, j, Block_Color[matrix[i][j]], matrix[i][j])
+    def drawLogo(self,dc):
+        dc.SetFont(self.bgFont)
+        dc.SetTextForeground((119,110,101))
+        dc.DrawText(u"2048",15,26)
 
+    def drawLabel(self,dc):
+        dc.SetFont(self.smFont)
+        dc.SetTextForeground((119,110,101))
+        dc.DrawText(u"合并相同数字，得到2048吧!",15,114)
+        dc.DrawText(u"怎么玩: \n用-> <- 上下左右箭头按键来移动方块. \
+                \n当两个相同数字的方块碰到一起时，会合成一个!",15,639)
 
-	@staticmethod
-	def drawBlock(screen, row, column, color, blocknum):
-		font = pygame.font.SysFont('stxingkai', 80)
-		w = column * Block_WH + (column + 1) * BLock_Space
-		h = row * Block_WH + (row + 1) * BLock_Space + 110
-		pygame.draw.rect(screen, color, (w, h, 110, 110))
-		if blocknum != 0:
-			fw, fh = font.size(str(int(blocknum)))
-			screen.blit(font.render(str(int(blocknum)), True, (0, 0, 0)), (w + (110 - fw) / 2, h + (110 - fh) / 2))
+    def drawScore(self,dc):            
+        dc.SetFont(self.smFont)
+        scoreLabelSize = dc.GetTextExtent(u"SCORE")
+        bestLabelSize = dc.GetTextExtent(u"BEST")
+        curScoreBoardMinW = 15*2+scoreLabelSize[0]
+        bstScoreBoardMinW = 15*2+bestLabelSize[0]
+        curScoreSize = dc.GetTextExtent(str(self.curScore))
+        bstScoreSize = dc.GetTextExtent(str(self.bstScore))
+        curScoreBoardNedW = 10+curScoreSize[0]
+        bstScoreBoardNedW = 10+bstScoreSize[0]
+        curScoreBoardW = max(curScoreBoardMinW,curScoreBoardNedW)
+        bstScoreBoardW = max(bstScoreBoardMinW,bstScoreBoardNedW)
+        dc.SetBrush(wx.Brush((187,173,160)))
+        dc.SetPen(wx.Pen((187,173,160)))
+        dc.DrawRoundedRectangle(505-15-bstScoreBoardW,40,bstScoreBoardW,50,3)
+        dc.DrawRoundedRectangle(505-15-bstScoreBoardW-5-curScoreBoardW,40,curScoreBoardW,50,3)
+        dc.SetTextForeground((238,228,218))
+        dc.DrawText(u"BEST",505-15-bstScoreBoardW+(bstScoreBoardW-bestLabelSize[0])/2,48)
+        dc.DrawText(u"SCORE",505-15-bstScoreBoardW-5-curScoreBoardW+(curScoreBoardW-scoreLabelSize[0])/2,48)
+        dc.SetTextForeground((255,255,255))
+        dc.DrawText(str(self.bstScore),505-15-bstScoreBoardW+(bstScoreBoardW-bstScoreSize[0])/2,68)
+        dc.DrawText(str(self.curScore),505-15-bstScoreBoardW-5-curScoreBoardW+(curScoreBoardW-curScoreSize[0])/2,68)
+    
+    def drawTiles(self,dc):
+        dc.SetFont(self.scFont)
+        for row in range(4):
+            for col in range(4):
+                value = self.data[row][col]
+                if value > 2048:
+                    color = (237, 207, 114)
+                else:
+                    color = self.colors[value]
+                if value==2 or value==4:
+                    dc.SetTextForeground((119,110,101))
+                else:
+                    dc.SetTextForeground((255,255,255))
+                dc.SetBrush(wx.Brush(color))
+                dc.SetPen(wx.Pen(color))
+                dc.DrawRoundedRectangle(30+col*115,165+row*115,100,100,2)
+                size = dc.GetTextExtent(str(value))
+                while size[0]>100-15*2:
+                    self.scFont = wx.Font(self.scFont.GetPointSize()*4/5,wx.SWISS,wx.NORMAL,wx.BOLD,face=u"Roboto")
+                    dc.SetFont(self.scFont)
+                    size = dc.GetTextExtent(str(value))
+                if value!=0: dc.DrawText(str(value),30+col*115+(100-size[0])/2,165+row*115+(100-size[1])/2)
 
-	@staticmethod
-	def keyDownPressed(keyvalue, matrix):
-		if keyvalue == K_LEFT:
-			return LeftAction(matrix)
-		elif keyvalue == K_RIGHT:
-			return RightAction(matrix)
-		elif keyvalue == K_UP:
-			return UpAction(matrix)
-		elif keyvalue == K_DOWN:
-			return DownAction(matrix)
+    def drawAll(self):
+        # 使用 BufferedDC 来画图
+        dc = wx.BufferedDC(wx.ClientDC(self),self.buffer)
+        self.drawBg(dc)
+        self.drawLogo(dc)
+        self.drawLabel(dc)
+        self.drawScore(dc)
+        self.drawTiles(dc)
 
-	@staticmethod
-	def gameOver(matrix):
-		testmatrix = matrix.copy()
-		a, b = testmatrix.shape
-		for i in range(a):
-			for j in range(b - 1):
-				if testmatrix[i][j] == testmatrix[i][j + 1]:                    #如果每行存在相邻两个数相同，则游戏没有结束
-					print('游戏没有结束')
-					return False
-		for i in range(b):
-			for j in range(a - 1):
-				if testmatrix[j][i] == testmatrix[j + 1][i]:
-					print('游戏没有结束')
-					return False
-		print('游戏结束')
-		return True
+    def drawChange(self,score):
+        dc = wx.BufferedDC(wx.ClientDC(self),self.buffer)
+        if score:
+            # 更新分数
+            self.curScore += score
+            # 更新最高分
+            if self.curScore > self.bstScore:
+                self.bstScore = self.curScore
+            self.drawScore(dc)
+        self.drawTiles(dc)
 
-def main():
-	pygame.init()
-	screen = pygame.display.set_mode(Screen_Size, 0, 32)      #屏幕设置
-	matrix = GameInit.initData(Size)
-	currentscore = 0
-	GameInit.drawSurface(screen, matrix, currentscore)
-	pygame.display.update()
-	while True:
-		for event in pygame.event.get():
-			if event.type == pygame.QUIT:
-				pygame.quit()
-				sys.exit(0)
-			elif event.type == pygame.KEYDOWN:
-				actionObject = GameInit.keyDownPressed(event.key, matrix)     #创建各种动作类的对象
-				matrix, score = actionObject.handleData()                     #处理数据
-				currentscore += score   
-				GameInit.drawSurface(screen, matrix, currentscore)
-				if matrix.min() != 0:
-					GameInit.gameOver(matrix)
-		pygame.display.update()
-
-
-if __name__ == '__main__':
-	main()
+        
+if __name__ == "__main__":
+    app = wx.App()
+    # 应用标题
+    Frame(u"2048")
+    app.MainLoop()
